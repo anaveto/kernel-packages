@@ -26,15 +26,9 @@ jobs:
             fail-fast: false
             matrix:
                 target:
-                    - id: fc43
-                      image: 'fedora:43'
-                    - id: fc44
-                      image: 'fedora:44'
+                    # test build for one MSI Claw 8 EX (Bazzite, Fedora 45) with the patches in extra/
                     - id: fc45
                       image: 'fedora:45'
-                    - id: el10
-                      image: 'quay.io/centos/centos:stream10'
-                      base_config_fedora: '43'
         runs-on: ubuntu-latest
 
         permissions:
@@ -244,7 +238,7 @@ jobs:
                   REPO="${OCI_REPO,,}"
                   EXISTING=$(oras repo tags "${REPO}" 2>/dev/null || true)
                   EXISTING=$(echo "$EXISTING" | { grep -cE "^${VERSION_PREFIX}\.[0-9]+-${{ matrix.target.id }}$" || true; })
-                  BUILD_NUM=$((EXISTING + 1))
+                  BUILD_NUM=90                      # test build: above the released ogc<rev>.1, so it replaces it
                   echo "build_num=$BUILD_NUM" >> "$GITHUB_OUTPUT"
                   echo "Build number: $BUILD_NUM"
 
@@ -324,6 +318,8 @@ jobs:
                   fi
                   # Verify OGC monolithic patch signature
                   gpg --verify monolithic.patch.sig monolithic.patch
+                  # test patches on top of the verified OGC patch (the spec applies monolithic.patch as Patch0)
+                  cat $GITHUB_WORKSPACE/extra/*.patch >> monolithic.patch
                   tar -xf linux-${TAR_KVER}.tar.xz
                   cd linux-${TAR_KVER}
                   patch -Np1 < ../monolithic.patch
@@ -369,6 +365,15 @@ jobs:
                   # Copy patched config
                   cp linux-${TAR_KVER}/.config "$TOPDIR/SOURCES/config"
                   rpmbuild --define "_topdir $TOPDIR" -ba ./fedora/kernel.spec
+
+            - name: Upload kernel RPMs
+              if: steps.check-existing.outputs.exists != 'true'
+              uses: actions/upload-artifact@v4
+              with:
+                  name: kernel-${{ steps.version.outputs.ogc_version }}.90-${{ matrix.target.id }}
+                  path: |
+                      rpmbuild/RPMS/x86_64/kernel-*.rpm
+                  retention-days: 14
 
             - name: Setup Cosign
               if: startsWith(github.ref, 'refs/tags/') && steps.check-existing.outputs.exists != 'true'

@@ -1,0 +1,120 @@
+--- a/drivers/hid/hid-msi.c
++++ b/drivers/hid/hid-msi.c
+@@ -334,6 +334,7 @@
+ 	struct completion send_cmd_complete;
+ 	struct delayed_work cfg_resume;
+ 	struct delayed_work cfg_setup;
++	struct work_struct mode_event;
+ 	spinlock_t registration_lock; /* Lock for registration read/write */
+ 	struct mutex profile_mutex; /* mutex for profile_pending calls */
+ 	spinlock_t profile_lock; /* Lock for profile_pending read/write */
+@@ -389,9 +390,18 @@
+ 	return -ENODEV;
+ }
+ 
+-static int claw_gamepad_mode_event(struct claw_drvdata *drvdata,
+-				   struct claw_command_report *cmd_rep)
++static void claw_mode_event_fn(struct work_struct *work)
++{
++	struct claw_drvdata *drvdata = container_of(work, struct claw_drvdata, mode_event);
++
++	kobject_uevent(&drvdata->hdev->dev.kobj, KOBJ_CHANGE);
++}
++
++static int claw_gamepad_mode_event(struct claw_drvdata *drvdata,
++				   struct claw_command_report *cmd_rep, bool unsolicited)
+ {
++	bool changed;
++
+ 	if (cmd_rep->data[0] >= ARRAY_SIZE(claw_gamepad_mode_text) ||
+ 	    !claw_gamepad_mode_text[cmd_rep->data[0]] ||
+ 	    cmd_rep->data[1] >= ARRAY_SIZE(claw_mkeys_function_text)) {
+@@ -402,8 +412,21 @@
+ 	}
+ 
+ 	scoped_guard(spinlock_irqsave, &drvdata->mode_lock) {
++		changed = drvdata->gamepad_mode != cmd_rep->data[0] ||
++			  drvdata->mkeys_function != cmd_rep->data[1];
+ 		drvdata->gamepad_mode = cmd_rep->data[0];
+ 		drvdata->mkeys_function = cmd_rep->data[1];
++	}
++
++	/*
++	 * The MCU changed the mode or M-key function by itself, e.g. while View+LB
++	 * is held. Tell userspace, which only learns of changes through uevents.
++	 */
++	if (unsolicited && changed) {
++		guard(spinlock_irqsave)(&drvdata->registration_lock);
++		/* Pairs with smp_store_release from cfg_setup_fn and claw_remove */
++		if (smp_load_acquire(&drvdata->gp_registered))
++			schedule_work(&drvdata->mode_event);
+ 	}
+ 
+ 	return 0;
+@@ -496,6 +519,7 @@
+ 			  u8 *data, int size)
+ {
+ 	struct claw_command_report *cmd_rep;
++	bool reading;
+ 	int ret = 0;
+ 
+ 	if (size != CLAW_PACKET_SIZE)
+@@ -512,8 +536,9 @@
+ 	guard(spinlock_irqsave)(&drvdata->cmd_lock);
+ 	switch (cmd_rep->cmd) {
+ 	case CLAW_COMMAND_TYPE_GAMEPAD_MODE_ACK:
+-		ret = claw_gamepad_mode_event(drvdata, cmd_rep);
+-		if (drvdata->waiting_cmd == CLAW_COMMAND_TYPE_READ_GAMEPAD_MODE) {
++		reading = drvdata->waiting_cmd == CLAW_COMMAND_TYPE_READ_GAMEPAD_MODE;
++		ret = claw_gamepad_mode_event(drvdata, cmd_rep, !reading);
++		if (reading) {
+ 			drvdata->cmd_status = ret;
+ 			complete(&drvdata->send_cmd_complete);
+ 		}
+@@ -668,6 +693,7 @@
+ {
+ 	struct claw_drvdata *drvdata = hid_get_drvdata(hdev);
+ 	u8 data[2];
++	int ret;
+ 
+ 	guard(mutex)(&drvdata->cfg_mutex);
+ 
+@@ -684,8 +710,18 @@
+ 		}
+ 	}
+ 
+-	return __claw_hw_output_report(hdev, CLAW_COMMAND_TYPE_SWITCH_MODE, data,
+-				       ARRAY_SIZE(data), 0);
++	ret = __claw_hw_output_report(hdev, CLAW_COMMAND_TYPE_SWITCH_MODE, data,
++				      ARRAY_SIZE(data), 0);
++	if (ret)
++		return ret;
++
++	/* Keep the cached state current, so a later change by the MCU is seen as one */
++	scoped_guard(spinlock_irqsave, &drvdata->mode_lock) {
++		drvdata->gamepad_mode = data[0];
++		drvdata->mkeys_function = data[1];
++	}
++
++	return 0;
+ }
+ 
+ static ssize_t gamepad_mode_store(struct device *dev, struct device_attribute *attr,
+@@ -1897,6 +1933,7 @@
+ 	INIT_DELAYED_WORK(&drvdata->cfg_resume, &cfg_resume_fn);
+ 	INIT_DELAYED_WORK(&drvdata->cfg_setup, &cfg_setup_fn);
+ 	INIT_DELAYED_WORK(&drvdata->rgb_queue, &claw_rgb_queue_fn);
++	INIT_WORK(&drvdata->mode_event, &claw_mode_event_fn);
+ 
+ 	/* For control interface: open the HID transport for sending commands. */
+ 	ret = hid_hw_open(hdev);
+@@ -1972,6 +2009,9 @@
+ 		smp_store_release(&drvdata->rgb_registered, false);
+ 	}
+ 
++	/* gp_registered is false now, so no new mode event can be queued */
++	cancel_work_sync(&drvdata->mode_event);
++
+ 	if (gp_registered)
+ 		device_remove_group(&hdev->dev, &claw_gamepad_attr_group);
+ 
