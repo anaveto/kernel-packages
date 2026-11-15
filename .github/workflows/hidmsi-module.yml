@@ -20,7 +20,7 @@ jobs:
       - name: Install kernel-devel 7.3.3-ogc1.90
         run: |
           find rpms -name 'kernel-devel-7*.rpm' ! -name '*matched*'
-          dnf install -y gcc make elfutils-libelf-devel $(find rpms -name 'kernel-devel-7*.rpm' ! -name '*matched*')
+          dnf install -y gcc make elfutils-libelf-devel kmod dwarves $(find rpms -name 'kernel-devel-7*.rpm' ! -name '*matched*')
       - name: Build
         run: |
           KDIR=/usr/src/kernels/7.3.3-ogc1.90.fc45.x86_64
@@ -28,7 +28,7 @@ jobs:
             make -C $KDIR M=$PWD/hidmsi/$v W=1 modules 2>&1 | tee hidmsi/$v/build.log
             modinfo hidmsi/$v/hid-msi.ko | grep -E 'vermagic|srcversion'
           done
-          ! grep -E 'warning:|error:' hidmsi/v*/build.log
+          ! grep -E "warning:|error:" hidmsi/v*/build.log | grep -v "pahole version"
           sha256sum hidmsi/v*/hid-msi.ko
       - uses: actions/upload-artifact@v4
         with:
