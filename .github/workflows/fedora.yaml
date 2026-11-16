@@ -293,7 +293,7 @@ jobs:
                              647F28654894E3BD457199BE38DBBDC86092693E:38DBBDC86092693E; do
                     KEYID="${KEY#*:}"
                     wget -T 30 -t 2 -O "${KEYID}.asc" "${KORG_KEYS}/${KEYID}.asc" ||
-                      wget -O "${KEYID}.asc" "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${KEY%:*}"
+                      cp "$GITHUB_WORKSPACE/extra/keys/${KEYID}.asc" .
                     gpg --import "${KEYID}.asc"
                     # Confirm the key landed under its expected full fingerprint
                     gpg --list-keys "${KEY%:*}" > /dev/null
