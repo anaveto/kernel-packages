@@ -292,7 +292,8 @@ jobs:
                   for KEY in ABAF11C65A2970B130ABE3C479BE3E4300411886:79BE3E4300411886 \
                              647F28654894E3BD457199BE38DBBDC86092693E:38DBBDC86092693E; do
                     KEYID="${KEY#*:}"
-                    wget -O "${KEYID}.asc" "${KORG_KEYS}/${KEYID}.asc"
+                    wget -T 30 -t 2 -O "${KEYID}.asc" "${KORG_KEYS}/${KEYID}.asc" ||
+                      wget -O "${KEYID}.asc" "https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x${KEY%:*}"
                     gpg --import "${KEYID}.asc"
                     # Confirm the key landed under its expected full fingerprint
                     gpg --list-keys "${KEY%:*}" > /dev/null
