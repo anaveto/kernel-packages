@@ -30,6 +30,7 @@ jobs:
                     - id: fc45
                       image: 'fedora:45'
         runs-on: ubuntu-latest
+        timeout-minutes: 240
 
         permissions:
             contents: read
@@ -238,7 +239,7 @@ jobs:
                   REPO="${OCI_REPO,,}"
                   EXISTING=$(oras repo tags "${REPO}" 2>/dev/null || true)
                   EXISTING=$(echo "$EXISTING" | { grep -cE "^${VERSION_PREFIX}\.[0-9]+-${{ matrix.target.id }}$" || true; })
-                  BUILD_NUM=90                      # test build: above the released ogc<rev>.1, so it replaces it
+                  BUILD_NUM=91                      # test build: above the released ogc<rev>.1, so it replaces it
                   echo "build_num=$BUILD_NUM" >> "$GITHUB_OUTPUT"
                   echo "Build number: $BUILD_NUM"
 
@@ -370,7 +371,7 @@ jobs:
               if: steps.check-existing.outputs.exists != 'true'
               uses: actions/upload-artifact@v4
               with:
-                  name: kernel-${{ steps.version.outputs.ogc_version }}.90-${{ matrix.target.id }}
+                  name: kernel-${{ steps.version.outputs.ogc_version }}.91-${{ matrix.target.id }}
                   path: |
                       rpmbuild/RPMS/x86_64/kernel-*.rpm
                   retention-days: 14
