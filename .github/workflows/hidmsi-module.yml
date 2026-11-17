@@ -1,7 +1,7 @@
 name: hid-msi test modules
 on:
   push:
-    branches: [claw-hidmsi-v4-test]
+    branches: [claw-hidmsi-reread-test]
 permissions:
   actions: read
   contents: read
@@ -13,26 +13,28 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: kernel-7.3.3-ogc1.90-fc45
-          run-id: 43624700336
+          name: kernel-7.3.3-ogc1.91-fc45
+          run-id: 43874001439
           github-token: ${{ github.token }}
           path: rpms
-      - name: Install kernel-devel 7.3.3-ogc1.90
+      - name: Install kernel-devel 7.3.3-ogc1.91
         run: |
           find rpms -name 'kernel-devel-7*.rpm' ! -name '*matched*'
           dnf install -y gcc make elfutils-libelf-devel kmod dwarves $(find rpms -name 'kernel-devel-7*.rpm' ! -name '*matched*')
       - name: Build
         run: |
-          KDIR=/usr/src/kernels/7.3.3-ogc1.90.fc45.x86_64
-          for v in v3 v4; do
+          KDIR=/usr/src/kernels/7.3.3-ogc1.91.fc45.x86_64
+          for v in inj fix; do
             make -C $KDIR M=$PWD/hidmsi/$v W=1 modules 2>&1 | tee hidmsi/$v/build.log
             modinfo hidmsi/$v/hid-msi.ko | grep -E 'vermagic|srcversion'
           done
-          ! grep -E "warning:|error:" hidmsi/v*/build.log | grep -v "pahole version"
-          sha256sum hidmsi/v*/hid-msi.ko
+          ! grep -E "warning:|error:" hidmsi/inj/build.log hidmsi/fix/build.log | grep -v "pahole version"
+          sha256sum hidmsi/inj/hid-msi.ko hidmsi/fix/hid-msi.ko
       - uses: actions/upload-artifact@v4
         with:
           name: hid-msi-modules
           path: |
-            hidmsi/v*/hid-msi.ko
-            hidmsi/v*/build.log
+            hidmsi/inj/hid-msi.ko
+            hidmsi/inj/build.log
+            hidmsi/fix/hid-msi.ko
+            hidmsi/fix/build.log
